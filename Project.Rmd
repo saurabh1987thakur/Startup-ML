@@ -1,0 +1,129 @@
+---
+title: "Project"
+author: "Saurabh Singh"
+date: "October 20, 2015"
+output: html_document
+---
+
+%%%%%%%%%%%% A Binary Classification Model for predicting arrivals delays %%%%%%%%%%%%%%
+
+Problem Statement: Build a binary classification model for predicting arrival delays.
+Data: Use the US Dept. of Transportation on-time arrival data for non-stop domestic flights by major air carriers to predict arrival delays.
+Data used here: Period = January 2015,Rows = 17802,Columns = 22.
+
+
+1. Load the csv file in R
+2. Remove all the blanks(NULL values) from the Arrival Delay column(response)
+3. As we only want to know whether a fight will get delayed or not in future,in Arrival       Delay column,all values greater than 0 will be changed to 1(i.e.delay) and remain          0(i.e. not delay) otherwise.
+
+```{r}
+
+data <- read.csv("Flight.csv")
+
+data1<- data[-which(is.na(data$ARR_DELAY_NEW)), ]
+
+data1$ARR_DELAY_NEW[data1$ARR_DELAY_NEW > 0] <- 1
+
+```
+
+1. I will now find the best combination of predictors(variables) to make a model which can    predict the response variable(arrival delay) correctly.
+2. I have considered only seven variables here which looks relevant to me and those           are-DAY_OF_MONTH,DAY_OF_WEEK,AIRLINE_ID,FL_NUM,ORIGIN_AIRPORT_ID,DEST_AIRPORT_ID,ARR_T     IME. 
+3. regsubsets() function is used on training data set to perform best subset selection of     predictors.
+4. (nvmax=7) maximum model size value used here is 7 as there are maximum seven predictors.
+5. Then I calculated the validation set error for the best model of each model size.
+6. For each model size, the coefficients of best model is used to predict the response        value and then the test MSE(mean square error) is calculated for each model.
+7. At the end,I found out that the model with 6 variables is best as it gives the least       MSE.
+
+
+```{r}
+
+# Choosing among models using Cross Validation Technique  
+
+# predict function to find the predicted value for each model size is created   
+
+prediction <- function(object,newdata,id){
+  form <- as.formula(object$call[[2]])
+  mat <- model.matrix(form ,newdata)
+  coefficient <- coef(object ,id=id)
+  xvars <- names(coefficient)
+  mat[,xvars ]%*% coefficient
+  }
+
+library(leaps)
+k <- 10          # number of folds used in cross validation
+set.seed(1)
+folds <- sample(1:k,nrow(data1),replace=TRUE)
+cv.errors <- matrix(NA,k,7,dimnames=list(NULL,paste(1:7)))
+
+# Loop to find the best model for each model size is created
+# Matrix of k cross 7 (or 10X7) is formed here
+# In matrix (i,j)th elememt corresponds to the test MSE for the ith cross-validation fold  
+# for the best j-variable model. 
+
+for (j in 1:k){
+  best.fit <- regsubsets(ARR_DELAY_NEW ~ DAY_OF_MONTH+DAY_OF_WEEK+AIRLINE_ID+FL_NUM+
+                 ORIGIN_AIRPORT_ID+DEST_AIRPORT_ID+ARR_TIME,data=data1[folds!=j,],nvmax=7)
+
+  for (i in 1:7){
+    pred <- prediction(best.fit,data1[folds==j,],id=i)
+    cv.errors[j,i] <- mean((data1$ARR_DELAY_NEW[folds==j]-pred)^2)
+  }
+}
+
+mean.cv.errors <- apply(cv.errors,2,mean)                                                 
+
+# apply() function to average over the columns of the matrix in order to obtain a vector 
+# for which the jth element is the cross-validation error for the j-variable model 
+
+mean.cv.errors
+
+par(mfrow=c(1,1))
+plot(mean.cv.errors,type='b')
+
+reg.best=regsubsets(ARR_DELAY_NEW ~ DAY_OF_MONTH+DAY_OF_WEEK+AIRLINE_ID+FL_NUM+
+                 ORIGIN_AIRPORT_ID+DEST_AIRPORT_ID+ARR_TIME,data=data1,nvmax=7)
+
+coef(reg.best,6)  # predictors associated with response variable
+
+
+```
+
+1. Divide the whole data set in 80:20(or 4:1) ratio as training and validation(test) data     set.
+2. Training set has 13160 rows and validation set has 3291 rows.
+3. Fit a logistic regression model using only the training data set.
+4. Predict the probabilities that a flight will arrive late in the validation data set.
+5. Only 6 predictors are used in glm function as from the last part I got to know that only    six out of seven predictors are associated and would be helpful to predict response.
+6. Probabilities above 0.5 are considered to be a delay.  
+
+
+```{r}
+
+tr <- sample(1:nrow(data1), size =13160 , replace=F)
+train <- data1[tr, ]      # training data set
+test <- data1[-tr, ]      # validation data set
+
+glm.fit <- glm(ARR_DELAY_NEW ~ DAY_OF_MONTH+DAY_OF_WEEK+FL_NUM+
+                 ORIGIN_AIRPORT_ID+DEST_AIRPORT_ID+ARR_TIME,data=train,                                   family = binomial)     # generalized linear model function
+summary(glm.fit)
+
+
+glm.probs <- predict(glm.fit,newdata=test,type="response")   # predict the probability
+
+glm.pred <- rep(0,3291)
+glm.pred[glm.probs > 0.5] <- 1      # consider as delay if probabilty is above 0.5a  
+
+status.real <- test$ARR_DELAY_NEW
+
+table(glm.pred,status.real)
+
+mean(glm.pred==status.real)    # accuracy %
+
+mean(glm.pred!=status.real)    # error %
+
+
+```
+Conclusion: 
+
+1. Test error rate is 39.28 % and the accuracy rate is 60.71 % which means almost 61% of      the arrival delays could be predicted correctly.
+2. We can improve the accuracy rate if we choose a better model,good predictors or by         changing the ratio of training and test data sets.
+
